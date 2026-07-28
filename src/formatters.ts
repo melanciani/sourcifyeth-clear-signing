@@ -88,7 +88,7 @@ export async function renderField(
         externalDataProvider,
       );
     case "duration":
-      return formatDuration(value);
+      return formatDuration(value, fieldOptions);
     case "unit":
       return formatUnit(value, fieldOptions, metadata);
     case "enum":
@@ -630,12 +630,29 @@ export function formatTimestamp(seconds: bigint): RenderFieldResult {
 // duration format
 // ---------------------------------------------------------------------------
 
-export function formatDuration(value: ArgumentValue): RenderFieldResult {
+export function formatDuration(
+  value: ArgumentValue,
+  fieldOptions?: FieldFormatOptions,
+): RenderFieldResult {
   if (value.type !== "uint" && value.type !== "int")
     return typeMismatch(value, "uint or int", "duration");
 
   const totalSeconds = value.value < 0n ? -value.value : value.value;
-  const hours = totalSeconds / 3600n;
+
+  // type(uint256).max is a sentinel for an unbounded duration: render the
+  // `unboundedMessage` (default "Forever") instead of an astronomical value.
+  // A narrower-typed field can never hold this value, so it never misfires.
+  if (totalSeconds === (1n << 256n) - 1n) {
+    return {
+      rendered:
+        typeof fieldOptions?.params?.unboundedMessage === "string"
+          ? fieldOptions.params.unboundedMessage
+          : "Forever",
+    };
+  }
+
+  const days = totalSeconds / 86400n;
+  const hours = (totalSeconds % 86400n) / 3600n;
   const minutes = (totalSeconds % 3600n) / 60n;
   const secs = totalSeconds % 60n;
 
@@ -643,7 +660,7 @@ export function formatDuration(value: ArgumentValue): RenderFieldResult {
   const mm = minutes.toString().padStart(2, "0");
   const ss = secs.toString().padStart(2, "0");
 
-  return { rendered: `${hh}:${mm}:${ss}` };
+  return { rendered: `${days}d${hh}h${mm}m${ss}s` };
 }
 
 // ---------------------------------------------------------------------------

@@ -546,6 +546,7 @@ export interface DescriptorFieldFormatParams {
   nativeCurrencyAddress?: string | string[];
   threshold?: string | number;
   message?: string;
+  unboundedMessage?: string;
   chainIdPath?: string;
   chainId?: number;
   encoding?: "timestamp" | "blockheight";

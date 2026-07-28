@@ -1154,39 +1154,58 @@ describe("formatDate", () => {
 // ---------------------------------------------------------------------------
 
 describe("formatDuration", () => {
-  it("formats seconds as HH:MM:ss", () => {
+  it("formats seconds as Dd HHh MMm SSs", () => {
     const result = formatDuration(uint(8250n));
-    expect(result.rendered).toBe("02:17:30");
+    expect(result.rendered).toBe("0d02h17m30s");
   });
 
   it("formats zero", () => {
     const result = formatDuration(uint(0n));
-    expect(result.rendered).toBe("00:00:00");
+    expect(result.rendered).toBe("0d00h00m00s");
   });
 
   it("formats values under a minute", () => {
     const result = formatDuration(uint(45n));
-    expect(result.rendered).toBe("00:00:45");
+    expect(result.rendered).toBe("0d00h00m45s");
   });
 
   it("formats exactly one hour", () => {
     const result = formatDuration(uint(3600n));
-    expect(result.rendered).toBe("01:00:00");
+    expect(result.rendered).toBe("0d01h00m00s");
   });
 
-  it("handles large values (over 99 hours)", () => {
+  it("handles multi-day values", () => {
     const result = formatDuration(uint(360000n));
-    expect(result.rendered).toBe("100:00:00");
+    expect(result.rendered).toBe("4d04h00m00s");
   });
 
   it("formats values above Number.MAX_SAFE_INTEGER without precision loss", () => {
     const result = formatDuration(uint(9007199254740993n));
-    expect(result.rendered).toBe("2501999792983:36:33");
+    expect(result.rendered).toBe("104249991374d07h36m33s");
   });
 
   it("accepts int type", () => {
     const result = formatDuration(int(8250n));
-    expect(result.rendered).toBe("02:17:30");
+    expect(result.rendered).toBe("0d02h17m30s");
+  });
+
+  it("renders default 'Forever' for type(uint256).max", () => {
+    const result = formatDuration(uint(2n ** 256n - 1n));
+    expect(result.rendered).toBe("Forever");
+  });
+
+  it("renders a custom unboundedMessage for type(uint256).max", () => {
+    const result = formatDuration(uint(2n ** 256n - 1n), {
+      params: { unboundedMessage: "No expiry" },
+    });
+    expect(result.rendered).toBe("No expiry");
+  });
+
+  it("ignores unboundedMessage for a non-sentinel value", () => {
+    const result = formatDuration(uint(864000n), {
+      params: { unboundedMessage: "No expiry" },
+    });
+    expect(result.rendered).toBe("10d00h00m00s");
   });
 
   it("returns type mismatch for non-numeric types", () => {
