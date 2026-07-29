@@ -139,11 +139,11 @@ async function processArrayField(
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const basePath = parseGroupBasePath(fieldSpec.path);
   const length = ctx.getArrayLength(basePath);
-  const fieldArrayLengths = [{ path: basePath, length }];
+  const fieldArrayPaths = [{ path: fieldSpec.path, length }];
 
   const paramMismatch = checkParamArrayLengths(
     [fieldSpec],
-    fieldArrayLengths,
+    fieldArrayPaths,
     ctx,
   );
   if (paramMismatch) return { warnings: [paramMismatch] };
@@ -160,7 +160,7 @@ async function processArrayField(
   const iterResult = await iterateArrayField(fieldSpec, length, ctx);
   if ("warnings" in iterResult) return iterResult;
 
-  joinArrayValues(fieldArrayLengths, ctx.renderedValues);
+  joinArrayValues(fieldArrayPaths, ctx.renderedValues);
   return {
     group: { fields: iterResult.fields },
   };
@@ -363,12 +363,12 @@ async function processChildArrayPaths(
   ctx: FieldContext,
 ): Promise<{ group: DisplayFieldGroup } | { warnings: Warning[] }> {
   const childFields = group.fields ?? [];
-  const arrayLengths: { path: string; length: number }[] = [];
+  const arrayPaths: { path: string; length: number }[] = [];
   for (const child of childFields) {
     if (!isFieldGroup(child) && child.path?.includes(".[]")) {
       const childBasePath = parseGroupBasePath(child.path);
-      arrayLengths.push({
-        path: childBasePath,
+      arrayPaths.push({
+        path: child.path,
         length: ctx.getArrayLength(childBasePath),
       });
     }
@@ -376,10 +376,10 @@ async function processChildArrayPaths(
 
   // Per ERC-7730: when a field param references an array path, it must have
   // the same length as the field's own array path.
-  const paramMismatch = checkParamArrayLengths(childFields, arrayLengths, ctx);
+  const paramMismatch = checkParamArrayLengths(childFields, arrayPaths, ctx);
   if (paramMismatch) return { warnings: [paramMismatch] };
 
-  if (arrayLengths.every((a) => a.length === 0)) {
+  if (arrayPaths.every((a) => a.length === 0)) {
     return {
       group: emptyArrayGroup(group.label, "All arrays in group are empty"),
     };
@@ -388,11 +388,11 @@ async function processChildArrayPaths(
   const isBundled = group.iteration === "bundled";
 
   if (isBundled) {
-    const lengths = arrayLengths.map((a) => a.length);
+    const lengths = arrayPaths.map((a) => a.length);
     const first = lengths[0];
     if (lengths.some((l) => l !== first)) {
-      const detail = arrayLengths
-        .map((a) => `${a.path}=${a.length}`)
+      const detail = arrayPaths
+        .map((a) => `${parseGroupBasePath(a.path)}=${a.length}`)
         .join(", ");
       return {
         warnings: [
@@ -415,7 +415,7 @@ async function processChildArrayPaths(
       allFields.push(...result.fields);
     }
 
-    joinArrayValues(arrayLengths, ctx.renderedValues);
+    joinArrayValues(arrayPaths, ctx.renderedValues);
     return { group: { label: group.label, fields: allFields } };
   }
 
@@ -446,7 +446,7 @@ async function processChildArrayPaths(
     }
   }
 
-  joinArrayValues(arrayLengths, ctx.renderedValues);
+  joinArrayValues(arrayPaths, ctx.renderedValues);
   return { group: { label: group.label, fields: allFields } };
 }
 
@@ -601,25 +601,31 @@ function expandParamArrayIndex(
 }
 
 /**
- * For each array tracked in arrayLengths, join the rendered values of
- * individual elements (e.g. "recipients.[0]", "recipients.[1]") with " and "
- * and store the result under the base path (e.g. "recipients") in renderedValues.
- * This allows interpolateTemplate to resolve array placeholders directly.
+ * For each array wildcard path, join the rendered values of
+ * individual elements (e.g. "recipients.[0]", "recipients.[1]" or
+ * "items.[0].amount", "items.[1].amount") with " and " and store the result
+ * under the array wildcard path (e.g. "recipients.[]" or "items.[].amount") in
+ * renderedValues. For top-level array fields, also store the result under the
+ * base path (e.g. "recipients") for descriptor compatibility.
  */
 function joinArrayValues(
-  arrayLengths: { path: string; length: number }[],
+  arrayPaths: { path: string | undefined; length: number }[],
   renderedValues: Map<string, string>,
 ): void {
-  for (const { path, length } of arrayLengths) {
-    const basePath = stripStructuredRootPrefix(path);
+  for (const { path, length } of arrayPaths) {
+    if (!path) continue;
+    const wildcardPath = stripStructuredRootPrefix(path);
     const parts: string[] = [];
     for (let i = 0; i < length; i++) {
-      const v = renderedValues.get(`${basePath}.[${i}]`);
+      const v = renderedValues.get(wildcardPath.replace(".[]", `.[${i}]`));
       if (v !== undefined) parts.push(v);
     }
     if (parts.length > 0) {
-      renderedValues.set(`${basePath}.[]`, parts.join(" and "));
-      renderedValues.set(basePath, parts.join(" and "));
+      const joined = parts.join(" and ");
+      renderedValues.set(wildcardPath, joined);
+      if (wildcardPath.endsWith(".[]")) {
+        renderedValues.set(wildcardPath.slice(0, -3), joined);
+      }
     }
   }
 }
@@ -631,14 +637,14 @@ function joinArrayValues(
  */
 function checkParamArrayLengths(
   childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
-  fieldArrayLengths: { path: string; length: number }[],
+  fieldArrayPaths: { path: string | undefined; length: number }[],
   ctx: FieldContext,
 ): Warning | undefined {
   for (const child of childFields) {
     if (isFieldGroup(child) || !child.path?.includes(".[]")) continue;
     const childBasePath = parseGroupBasePath(child.path);
-    const fieldLength = fieldArrayLengths.find(
-      (a) => a.path === childBasePath,
+    const fieldLength = fieldArrayPaths.find(
+      (a) => parseGroupBasePath(a.path) === childBasePath,
     )?.length;
     if (fieldLength === undefined) continue;
 
