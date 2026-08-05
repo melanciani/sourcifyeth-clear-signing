@@ -660,7 +660,36 @@ export function formatDuration(
   const mm = minutes.toString().padStart(2, "0");
   const ss = secs.toString().padStart(2, "0");
 
-  return { rendered: `${days}d${hh}h${mm}m${ss}s` };
+  const approximation =
+    fieldOptions?.params?.approximation === true
+      ? approximationSuffix(totalSeconds)
+      : "";
+
+  return { rendered: `${days}d${hh}h${mm}m${ss}s${approximation}` };
+}
+
+/** Seconds in one month (30.4375 days) — twelve of these are exactly one Julian year. */
+const MONTH_SECONDS = 2629800n;
+
+/**
+ * Approximate calendar suffix appended when the `approximation` param is set,
+ * e.g. " (approx. 1 year and 6 months)". The value is rounded to the nearest
+ * month (halves away from zero) and zero components are omitted. Values below
+ * one month get no suffix, since the exact duration is already readable.
+ */
+function approximationSuffix(totalSeconds: bigint): string {
+  if (totalSeconds < MONTH_SECONDS) return "";
+
+  const months = (totalSeconds + MONTH_SECONDS / 2n) / MONTH_SECONDS;
+  const years = months / 12n;
+  const remainingMonths = months % 12n;
+
+  const parts: string[] = [];
+  if (years > 0n) parts.push(`${years} year${years === 1n ? "" : "s"}`);
+  if (remainingMonths > 0n)
+    parts.push(`${remainingMonths} month${remainingMonths === 1n ? "" : "s"}`);
+
+  return parts.length > 0 ? ` (approx. ${parts.join(" and ")})` : "";
 }
 
 // ---------------------------------------------------------------------------

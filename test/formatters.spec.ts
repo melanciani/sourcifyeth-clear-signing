@@ -1208,6 +1208,53 @@ describe("formatDuration", () => {
     expect(result.rendered).toBe("10d00h00m00s");
   });
 
+  it("appends no approximation by default", () => {
+    const result = formatDuration(uint(157766400n));
+    expect(result.rendered).toBe("1826d00h00m00s");
+  });
+
+  it("appends an approximation in years when enabled", () => {
+    const result = formatDuration(uint(157766400n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("1826d00h00m00s (approx. 5 years)");
+  });
+
+  it("appends years and months, omitting zero components", () => {
+    const result = formatDuration(uint(47336400n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("547d21h00m00s (approx. 1 year and 6 months)");
+  });
+
+  it("appends months only when under a year", () => {
+    const result = formatDuration(uint(18144000n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("210d00h00m00s (approx. 7 months)");
+  });
+
+  it("uses the singular form for exactly one month", () => {
+    const result = formatDuration(uint(2629800n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("30d10h30m00s (approx. 1 month)");
+  });
+
+  it("appends no approximation below one month", () => {
+    const result = formatDuration(uint(2629799n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("30d10h29m59s");
+  });
+
+  it("prefers the unbounded sentinel over the approximation", () => {
+    const result = formatDuration(uint(2n ** 256n - 1n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe("Forever");
+  });
+
   it("returns type mismatch for non-numeric types", () => {
     const result = formatDuration(str("hello"));
     expect(result.warning?.code).toBe("ARGUMENT_TYPE_MISMATCH");

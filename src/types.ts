@@ -547,6 +547,7 @@ export interface DescriptorFieldFormatParams {
   threshold?: string | number;
   message?: string;
   unboundedMessage?: string;
+  approximation?: boolean;
   chainIdPath?: string;
   chainId?: number;
   encoding?: "timestamp" | "blockheight";
