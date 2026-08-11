@@ -1213,14 +1213,23 @@ describe("formatDuration", () => {
     expect(result.rendered).toBe("1826d00h00m00s");
   });
 
-  it("appends an approximation in years when enabled", () => {
+  it("appends an approximation in years and months when enabled", () => {
+    const result = formatDuration(uint(160358400n), {
+      params: { approximation: true },
+    });
+    expect(result.rendered).toBe(
+      "1856d00h00m00s (approx. 5 years and 1 month)",
+    );
+  });
+
+  it("omits a zero month component", () => {
     const result = formatDuration(uint(157766400n), {
       params: { approximation: true },
     });
     expect(result.rendered).toBe("1826d00h00m00s (approx. 5 years)");
   });
 
-  it("appends years and months, omitting zero components", () => {
+  it("appends years and months for sub-decade values", () => {
     const result = formatDuration(uint(47336400n), {
       params: { approximation: true },
     });
