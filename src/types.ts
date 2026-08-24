@@ -606,14 +606,24 @@ export interface DescriptorFieldEncryption {
   fallbackLabel?: string;
 }
 
+/**
+ * A reference to a `metadata.maps` entry, usable anywhere a constant param is
+ * accepted. `map` is a `$.metadata.maps.NAME` pointer; `keyPath` points at the
+ * transaction/message value used to select the entry.
+ */
+export interface DescriptorMapReference {
+  map: string;
+  keyPath: string;
+}
+
 export interface DescriptorFieldFormatParams {
   tokenPath?: string;
-  token?: string;
+  token?: string | DescriptorMapReference;
   nativeCurrencyAddress?: string | string[];
   threshold?: string | number;
   message?: string;
   chainIdPath?: string;
-  chainId?: number;
+  chainId?: number | DescriptorMapReference;
   encoding?: "timestamp" | "blockheight";
   base?: string;
   decimals?: number;
@@ -710,13 +720,19 @@ export interface DescriptorMetadataToken {
   decimals?: number;
 }
 
+export interface DescriptorMetadataMap {
+  /** Non-normative hint describing what the map is keyed on. */
+  $keyType?: string;
+  values?: Record<string, string | number | boolean>;
+}
+
 export interface DescriptorMetadata {
   owner?: string;
   contractName?: string;
   info?: DescriptorMetadataInfo;
   token?: DescriptorMetadataToken;
   constants?: Record<string, string | number | boolean>;
-  maps?: Record<string, unknown>;
+  maps?: Record<string, DescriptorMetadataMap>;
   enums?: Record<string, Record<string, string>>;
 }
 
