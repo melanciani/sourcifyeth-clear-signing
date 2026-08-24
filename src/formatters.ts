@@ -6,6 +6,7 @@ import type {
   BlockTimestampResult,
   ChainInfoResult,
   DescriptorFieldFormat,
+  DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DescriptorMapReference,
   DescriptorMetadata,
@@ -406,6 +407,18 @@ export function isMapReference(
 }
 
 /**
+ * Narrow a param that may carry a map reference down to its constant form.
+ *
+ * References are substituted by {@link resolveParamMapReferences} before any
+ * field is rendered, so by the time a format handler reads a param it is always
+ * a constant. This guard keeps the handlers honest for the case where they are
+ * driven directly, treating a leftover reference as an absent param.
+ */
+function asConstant<T>(value: T | DescriptorMapReference): T | undefined {
+  return isMapReference(value) ? undefined : (value as T);
+}
+
+/**
  * Canonical string form of a resolved path value, for use as a `metadata.maps`
  * lookup key. Addresses and byte strings are lowercased hex so that
  * checksummed keys in the descriptor still match; integers are decimal.
@@ -444,7 +457,7 @@ export function resolveMapReference(
   ref: DescriptorMapReference,
   resolvePath: ResolvePath,
   metadata: DescriptorMetadata | undefined,
-): string | undefined {
+): string | number | boolean | undefined {
   const mapDef = resolveMetadataValue(metadata, ref.map) as
     | DescriptorMetadataMap
     | undefined;
@@ -457,14 +470,55 @@ export function resolveMapReference(
   // Direct hit first, then a case-insensitive sweep so that checksummed
   // address keys match a lowercased resolved key (and vice versa).
   const direct = values[key];
-  if (direct !== undefined) return String(direct);
+  if (direct !== undefined) return direct;
 
   const lowered = key.toLowerCase();
   for (const [candidate, mapped] of Object.entries(values)) {
-    if (candidate.toLowerCase() === lowered) return String(mapped);
+    if (candidate.toLowerCase() === lowered) return mapped;
   }
 
   return undefined;
+}
+
+/**
+ * Substitute every `metadata.maps` reference in a params object with its
+ * resolved constant.
+ *
+ * Per ERC-7730, a map reference may stand in for any constant parameter value,
+ * so substitution is generic rather than per-format: `token`, `threshold`,
+ * `nativeCurrencyAddress`, `senderAddress`, the `unit` scale and `chainId` are
+ * all handled by the same pass. Values keep their JSON type, so a map yielding
+ * an integer still satisfies a numeric param such as `decimals`.
+ *
+ * A lookup miss means the descriptor does not describe the transaction it is
+ * being applied to, so the caller MUST abandon the whole format rather than
+ * render the remaining fields — the returned `unresolved` entry names the
+ * offending parameter for the diagnostic.
+ */
+export function resolveParamMapReferences(
+  params: DescriptorFieldFormatParams | undefined,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+):
+  | { ok: true; params: DescriptorFieldFormatParams | undefined }
+  | { ok: false; unresolved: string } {
+  if (!params) return { ok: true, params };
+
+  let substituted: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(params)) {
+    if (!isMapReference(value)) continue;
+    const mapped = resolveMapReference(value, resolvePath, metadata);
+    if (mapped === undefined) {
+      return { ok: false, unresolved: name };
+    }
+    substituted ??= { ...(params as Record<string, unknown>) };
+    substituted[name] = mapped;
+  }
+
+  return {
+    ok: true,
+    params: (substituted as DescriptorFieldFormatParams | undefined) ?? params,
+  };
 }
 
 /**
@@ -483,10 +537,14 @@ export function resolveTokenAddress(
   const token = params.token ?? params.tokenPath;
   if (!token) return undefined;
 
-  // Context-dependent constant via metadata.maps
+  // Context-dependent constant via metadata.maps. Normally already substituted
+  // by resolveParamMapReferences before rendering; handled here too so the
+  // helper is correct when called directly.
   if (isMapReference(token)) {
     const mapped = resolveMapReference(token, resolvePath, metadata);
-    return mapped && isAddressString(mapped) ? mapped.toLowerCase() : undefined;
+    return typeof mapped === "string" && isAddressString(mapped)
+      ? mapped.toLowerCase()
+      : undefined;
   }
 
   if (typeof token !== "string") return undefined;
@@ -616,7 +674,7 @@ export function resolveCollectionAddress(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const collection = params.collection ?? params.collectionPath;
+  const collection = asConstant(params.collection) ?? params.collectionPath;
   if (!collection) return undefined;
 
   // Constant address
@@ -758,8 +816,8 @@ export function formatUnit(
     return typeMismatch(value, "uint or int", "unit");
 
   const params = fieldOptions.params ?? {};
-  const base = resolveUnitBase(params.base, metadata);
-  const decimals = params.decimals ?? 0;
+  const base = resolveUnitBase(asConstant(params.base), metadata);
+  const decimals = asConstant(params.decimals) ?? 0;
   const prefix = params.prefix === true;
 
   const formatted = formatAmountWithDecimals(value.value, decimals);
@@ -989,7 +1047,7 @@ function resolveCallee(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const spec = params.callee ?? params.calleePath;
+  const spec = asConstant(params.callee) ?? params.calleePath;
   if (!spec) return undefined;
 
   if (isAddressString(spec)) {
@@ -1013,7 +1071,7 @@ function resolveAmountParam(
   resolvePath: ResolvePath,
 ): bigint | undefined {
   const params = field.params ?? {};
-  const spec = params.amount ?? params.amountPath;
+  const spec = asConstant(params.amount) ?? params.amountPath;
   if (!spec) return undefined;
 
   const resolved = resolvePath(spec);
@@ -1042,7 +1100,7 @@ function resolveSpenderParam(
   resolvePath: ResolvePath,
 ): string | undefined {
   const params = field.params ?? {};
-  const spec = params.spender ?? params.spenderPath;
+  const spec = asConstant(params.spender) ?? params.spenderPath;
   if (!spec) return undefined;
 
   if (isAddressString(spec)) {
@@ -1066,7 +1124,7 @@ function resolveSelectorParam(
   resolvePath: ResolvePath,
 ): Uint8Array | undefined {
   const params = field.params ?? {};
-  const spec = params.selector ?? params.selectorPath;
+  const spec = asConstant(params.selector) ?? params.selectorPath;
   if (!spec) return undefined;
 
   if (typeof spec === "string" && spec.startsWith("0x") && spec.length === 10) {

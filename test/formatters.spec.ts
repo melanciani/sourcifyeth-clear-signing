@@ -15,6 +15,7 @@ import {
   tokenAmountMessage,
   resolveTokenAddress,
   resolveMapReference,
+  resolveParamMapReferences,
   isMapReference,
   formatDate,
   formatTimestamp,
@@ -2137,12 +2138,16 @@ describe("resolveMapReference", () => {
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         },
       },
-      byChain: { values: { "1": "0x0000000000000000000000000000000000000001" } },
+      byChain: {
+        values: { "1": "0x0000000000000000000000000000000000000001" },
+      },
     },
   };
 
-  const resolveTo = (bytes: Uint8Array): ResolvePath => (path) =>
-    path === "@.to" ? { type: "address", bytes } : undefined;
+  const resolveTo =
+    (bytes: Uint8Array): ResolvePath =>
+    (path) =>
+      path === "@.to" ? { type: "address", bytes } : undefined;
 
   it("resolves a checksummed key from a lowercased address value", () => {
     const resolve = resolveTo(
@@ -2264,5 +2269,88 @@ describe("resolveTokenAddress with a map reference", () => {
 
   it("does not treat a map reference as a $.metadata.token reference", () => {
     expect(resolveMetadataToken(field, {}).hasMetadataRef).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// metadata.maps: generic param substitution
+// ---------------------------------------------------------------------------
+
+describe("resolveParamMapReferences", () => {
+  const metadata: DescriptorMetadata = {
+    maps: {
+      underlying: {
+        values: {
+          "0xda9396b82634Ea99243cE51258B6A5Ae512D4893":
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+        },
+      },
+      scale: { values: { "0xda9396b82634Ea99243cE51258B6A5Ae512D4893": 18 } },
+    },
+  };
+  const resolveTo: ResolvePath = (path) =>
+    path === "@.to"
+      ? {
+          type: "address",
+          bytes: hexToBytes("0xda9396b82634Ea99243cE51258B6A5Ae512D4893"),
+        }
+      : undefined;
+
+  it("passes through params with no map reference", () => {
+    const params = { tokenPath: "@.to", threshold: "0x800" };
+    const result = resolveParamMapReferences(params, resolveTo, metadata);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params).toBe(params);
+  });
+
+  it("returns undefined params untouched", () => {
+    const result = resolveParamMapReferences(undefined, resolveTo, metadata);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.params).toBeUndefined();
+  });
+
+  it("substitutes a map reference on any constant param", () => {
+    // decimals is one of the params the schema newly declares map-capable.
+    const result = resolveParamMapReferences(
+      {
+        token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+        decimals: { map: "$.metadata.maps.scale", keyPath: "@.to" },
+      },
+      resolveTo,
+      metadata,
+    );
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.params?.token).toBe(
+        "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
+      );
+      // Values keep their JSON type, so a numeric param stays numeric.
+      expect(result.params?.decimals).toBe(18);
+    }
+  });
+
+  it("reports the offending param on a lookup miss", () => {
+    const resolveMissing: ResolvePath = () => ({
+      type: "address",
+      bytes: hexToBytes("0x0000000000000000000000000000000000000009"),
+    });
+    const result = resolveParamMapReferences(
+      { token: { map: "$.metadata.maps.underlying", keyPath: "@.to" } },
+      resolveMissing,
+      metadata,
+    );
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.unresolved).toBe("token");
+  });
+
+  it("does not mutate the params object it was given", () => {
+    const params = {
+      token: { map: "$.metadata.maps.underlying", keyPath: "@.to" },
+    };
+    resolveParamMapReferences(params, resolveTo, metadata);
+    expect(params.token).toEqual({
+      map: "$.metadata.maps.underlying",
+      keyPath: "@.to",
+    });
   });
 });
