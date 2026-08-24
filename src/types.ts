@@ -95,6 +95,7 @@ export type WarningCode =
   | "UNKNOWN_NFT_COLLECTION"
   | "BUNDLED_ARRAY_SIZE_MISMATCH"
   | "FORMAT_PARAM_RESOLUTION_ERROR"
+  | "DESCRIPTOR_NOT_APPLICABLE"
   | "UNKNOWN_ENCODING"
   | "UNKNOWN_BLOCK"
   | "UNKNOWN_CHAIN"
@@ -619,29 +620,29 @@ export interface DescriptorMapReference {
 export interface DescriptorFieldFormatParams {
   tokenPath?: string;
   token?: string | DescriptorMapReference;
-  nativeCurrencyAddress?: string | string[];
-  threshold?: string | number;
+  nativeCurrencyAddress?: string | string[] | DescriptorMapReference;
+  threshold?: string | number | DescriptorMapReference;
   message?: string;
   chainIdPath?: string;
   chainId?: number | DescriptorMapReference;
   encoding?: "timestamp" | "blockheight";
-  base?: string;
-  decimals?: number;
+  base?: string | DescriptorMapReference;
+  decimals?: number | DescriptorMapReference;
   prefix?: boolean;
   $ref?: string;
   collectionPath?: string;
-  collection?: string;
+  collection?: string | DescriptorMapReference;
   calleePath?: string;
-  callee?: string;
+  callee?: string | DescriptorMapReference;
   selectorPath?: string;
-  selector?: string;
+  selector?: string | DescriptorMapReference;
   amountPath?: string;
-  amount?: string;
+  amount?: string | DescriptorMapReference;
   spenderPath?: string;
-  spender?: string;
+  spender?: string | DescriptorMapReference;
   types?: DescriptorAddressType[];
   sources?: DescriptorAddressSource[];
-  senderAddress?: string | string[];
+  senderAddress?: string | string[] | DescriptorMapReference;
 }
 
 export interface DescriptorFieldFormat {
