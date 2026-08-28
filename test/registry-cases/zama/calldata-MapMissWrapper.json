@@ -28,7 +28,7 @@
   },
   "display": {
     "formats": {
-      "wrap(address to, uint256 amount)": {
+      "wrap(address to,uint256 amount)": {
         "$id": "wrap",
         "intent": "Shield",
         "interpolatedIntent": "Shield {amount} to {to}",
