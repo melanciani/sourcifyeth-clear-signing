@@ -852,7 +852,6 @@ export interface DescriptorMetadataToken {
 }
 
 export interface DescriptorMetadataMap {
-  /** Non-normative hint describing what the map is keyed on. */
   $keyType?: string;
   values?: Record<string, string | number | boolean>;
 }

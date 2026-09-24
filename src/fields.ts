@@ -619,8 +619,90 @@ function expandParamArrayIndex(
   return result as DescriptorFieldFormat["params"];
 }
 
+/**
+ * For each array wildcard path, join the rendered values of
+ * individual elements (e.g. "recipients.[0]", "recipients.[1]" or
+ * "items.[0].amount", "items.[1].amount") with " and " and store the result
+ * under the array wildcard path (e.g. "recipients.[]" or "items.[].amount") in
+ * renderedValues. For top-level array fields, also store the result under the
+ * base path (e.g. "recipients") for descriptor compatibility.
+ */
+function joinArrayValues(
+  arrayPaths: { path: string | undefined; length: number }[],
+  renderedValues: Map<string, string>,
+): void {
+  for (const { path, length } of arrayPaths) {
+    if (!path) continue;
+    const wildcardPath = stripStructuredRootPrefix(path);
+    const parts: string[] = [];
+    for (let i = 0; i < length; i++) {
+      const v = renderedValues.get(wildcardPath.replace(".[]", `.[${i}]`));
+      if (v !== undefined) parts.push(v);
+    }
+    if (parts.length > 0) {
+      const joined = parts.join(" and ");
+      renderedValues.set(wildcardPath, joined);
+      if (wildcardPath.endsWith(".[]")) {
+        renderedValues.set(wildcardPath.slice(0, -3), joined);
+      }
+    }
+  }
+}
+
+/**
+ * Check that parameter array paths referenced by child fields have the same
+ * length as the field's own array path. Per ERC-7730, parameter arrays must
+ * match the formatted array length.
+ */
+function checkParamArrayLengths(
+  childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
+  fieldArrayPaths: { path: string | undefined; length: number }[],
+  ctx: FieldContext,
+): Warning | undefined {
+  for (const child of childFields) {
+    if (isFieldGroup(child) || !child.path?.includes(".[]")) continue;
+    const childBasePath = parseGroupBasePath(child.path);
+    const fieldLength = fieldArrayPaths.find(
+      (a) => parseGroupBasePath(a.path) === childBasePath,
+    )?.length;
+    if (fieldLength === undefined) continue;
+
+    const params = child.params ?? {};
+    for (const paramValue of Object.values(params)) {
+      if (typeof paramValue !== "string" || !paramValue.includes(".[]"))
+        continue;
+      const paramBasePath = parseGroupBasePath(paramValue);
+      const paramLength = ctx.getArrayLength(paramBasePath);
+      if (paramLength > 0 && paramLength !== fieldLength) {
+        return warn(
+          "PARAM_ARRAY_SIZE_MISMATCH",
+          `Parameter array '${paramBasePath}' has length ${paramLength} but field array '${childBasePath}' has length ${fieldLength}`,
+        );
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Parse the base array path from a `.[]` selector — the prefix up to (but
+ * excluding) the first `.[]`. Returns the path unchanged if there is no
+ * `.[]` selector.
+ *
+ * Examples:
+ *   "details.[]"            → "details"
+ *   "creators.[].account"   → "creators"
+ *   "tokenId"               → "tokenId"
+ */
+function parseGroupBasePath(path: string | undefined): string {
+  if (!path) return "";
+  const idx = path.indexOf(".[]");
+  if (idx === -1) return path;
+  return path.slice(0, idx);
+}
+
 // ---------------------------------------------------------------------------
-// metadata.maps references
+// Map Support
 // ---------------------------------------------------------------------------
 
 /** Type guard for a `{ map, keyPath }` map reference param. */
@@ -732,88 +814,6 @@ function resolveParamMapReferences(
   return {
     field: { ...field, params: substituted as DescriptorFieldFormatParams },
   };
-}
-
-/**
- * For each array wildcard path, join the rendered values of
- * individual elements (e.g. "recipients.[0]", "recipients.[1]" or
- * "items.[0].amount", "items.[1].amount") with " and " and store the result
- * under the array wildcard path (e.g. "recipients.[]" or "items.[].amount") in
- * renderedValues. For top-level array fields, also store the result under the
- * base path (e.g. "recipients") for descriptor compatibility.
- */
-function joinArrayValues(
-  arrayPaths: { path: string | undefined; length: number }[],
-  renderedValues: Map<string, string>,
-): void {
-  for (const { path, length } of arrayPaths) {
-    if (!path) continue;
-    const wildcardPath = stripStructuredRootPrefix(path);
-    const parts: string[] = [];
-    for (let i = 0; i < length; i++) {
-      const v = renderedValues.get(wildcardPath.replace(".[]", `.[${i}]`));
-      if (v !== undefined) parts.push(v);
-    }
-    if (parts.length > 0) {
-      const joined = parts.join(" and ");
-      renderedValues.set(wildcardPath, joined);
-      if (wildcardPath.endsWith(".[]")) {
-        renderedValues.set(wildcardPath.slice(0, -3), joined);
-      }
-    }
-  }
-}
-
-/**
- * Check that parameter array paths referenced by child fields have the same
- * length as the field's own array path. Per ERC-7730, parameter arrays must
- * match the formatted array length.
- */
-function checkParamArrayLengths(
-  childFields: (DescriptorFieldFormat | DescriptorFieldGroup)[],
-  fieldArrayPaths: { path: string | undefined; length: number }[],
-  ctx: FieldContext,
-): Warning | undefined {
-  for (const child of childFields) {
-    if (isFieldGroup(child) || !child.path?.includes(".[]")) continue;
-    const childBasePath = parseGroupBasePath(child.path);
-    const fieldLength = fieldArrayPaths.find(
-      (a) => parseGroupBasePath(a.path) === childBasePath,
-    )?.length;
-    if (fieldLength === undefined) continue;
-
-    const params = child.params ?? {};
-    for (const paramValue of Object.values(params)) {
-      if (typeof paramValue !== "string" || !paramValue.includes(".[]"))
-        continue;
-      const paramBasePath = parseGroupBasePath(paramValue);
-      const paramLength = ctx.getArrayLength(paramBasePath);
-      if (paramLength > 0 && paramLength !== fieldLength) {
-        return warn(
-          "PARAM_ARRAY_SIZE_MISMATCH",
-          `Parameter array '${paramBasePath}' has length ${paramLength} but field array '${childBasePath}' has length ${fieldLength}`,
-        );
-      }
-    }
-  }
-  return undefined;
-}
-
-/**
- * Parse the base array path from a `.[]` selector — the prefix up to (but
- * excluding) the first `.[]`. Returns the path unchanged if there is no
- * `.[]` selector.
- *
- * Examples:
- *   "details.[]"            → "details"
- *   "creators.[].account"   → "creators"
- *   "tokenId"               → "tokenId"
- */
-function parseGroupBasePath(path: string | undefined): string {
-  if (!path) return "";
-  const idx = path.indexOf(".[]");
-  if (idx === -1) return path;
-  return path.slice(0, idx);
 }
 
 // ---------------------------------------------------------------------------
