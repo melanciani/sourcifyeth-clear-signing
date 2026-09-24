@@ -95,7 +95,6 @@ export type WarningCode =
   | "UNKNOWN_NFT_COLLECTION"
   | "BUNDLED_ARRAY_SIZE_MISMATCH"
   | "FORMAT_PARAM_RESOLUTION_ERROR"
-  | "DESCRIPTOR_NOT_APPLICABLE"
   | "UNKNOWN_ENCODING"
   | "UNKNOWN_BLOCK"
   | "UNKNOWN_CHAIN"
@@ -737,9 +736,11 @@ export interface DescriptorFieldEncryption {
 }
 
 /**
- * A reference to a `metadata.maps` entry, usable anywhere a constant param is
- * accepted. `map` is a `$.metadata.maps.NAME` pointer; `keyPath` points at the
- * transaction/message value used to select the entry.
+ * A reference to a `metadata.maps` entry, accepted on the constant params the
+ * ERC-7730 schema marks map-capable (`token`, `chainId`, `collection`,
+ * `callee`, `selector`, `amount`, `spender`). `map` is a
+ * `$.metadata.maps.NAME` pointer; `keyPath` points at the transaction/message
+ * value used to select the entry.
  */
 export interface DescriptorMapReference {
   map: string;
@@ -749,14 +750,14 @@ export interface DescriptorMapReference {
 export interface DescriptorFieldFormatParams {
   tokenPath?: string;
   token?: string | DescriptorMapReference;
-  nativeCurrencyAddress?: string | string[] | DescriptorMapReference;
-  threshold?: string | number | DescriptorMapReference;
+  nativeCurrencyAddress?: string | string[];
+  threshold?: string | number;
   message?: string;
   chainIdPath?: string;
   chainId?: number | DescriptorMapReference;
   encoding?: "timestamp" | "blockheight";
-  base?: string | DescriptorMapReference;
-  decimals?: number | DescriptorMapReference;
+  base?: string;
+  decimals?: number;
   prefix?: boolean;
   $ref?: string;
   collectionPath?: string;
@@ -771,7 +772,7 @@ export interface DescriptorFieldFormatParams {
   spender?: string | DescriptorMapReference;
   types?: DescriptorAddressType[];
   sources?: DescriptorAddressSource[];
-  senderAddress?: string | string[] | DescriptorMapReference;
+  senderAddress?: string | string[];
 }
 
 export interface DescriptorFieldFormat {

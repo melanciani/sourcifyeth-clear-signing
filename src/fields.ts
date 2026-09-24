@@ -8,9 +8,11 @@
 import type {
   DescriptorFieldEncryption,
   DescriptorFieldFormat,
+  DescriptorFieldFormatParams,
   DescriptorFieldFormatType,
   DescriptorFieldGroup,
   DescriptorFormatSpec,
+  DescriptorMapReference,
   DescriptorMetadata,
   DisplayField,
   DisplayFieldGroup,
@@ -33,6 +35,7 @@ import {
   isFieldGroup,
   mergeDefinitions,
   resolveFieldValue,
+  resolveMetadataEntry,
   resolvedToAddress,
   stripStructuredRootPrefix,
   toArgumentValue,
@@ -50,7 +53,7 @@ import {
   warn,
 } from "./utils.js";
 import type { RenderFieldResult } from "./formatters.js";
-import { renderField, resolveParamMapReferences } from "./formatters.js";
+import { renderField } from "./formatters.js";
 
 /** Callback to get the length of an array at a given container path. */
 export type GetArrayLength = (path: string) => number;
@@ -187,26 +190,15 @@ async function processSingleField(
 
   if (merged.visible === "never") return { field: null };
 
-  // Substitute metadata.maps references in the field's params before anything
-  // is rendered. Per ERC-7730 a lookup miss means this descriptor does not
-  // describe the transaction, so the whole format is abandoned rather than
-  // rendered with a missing constant.
-  const mapParams = resolveParamMapReferences(
-    merged.params,
+  // Substitute metadata.maps references in the params before anything is
+  // rendered, so format handlers only ever see constants.
+  const mapResult = resolveParamMapReferences(
+    merged,
     ctx.resolvePath,
     ctx.metadata,
   );
-  if (!mapParams.ok) {
-    return {
-      warnings: [
-        warn(
-          "DESCRIPTOR_NOT_APPLICABLE",
-          `No metadata.maps entry matches for param '${mapParams.unresolved}' of field '${merged.label ?? merged.path}'`,
-        ),
-      ],
-    };
-  }
-  merged = { ...merged, params: mapParams.params };
+  if ("warning" in mapResult) return { warnings: [mapResult.warning] };
+  merged = mapResult.field;
 
   const resolvedValue = resolveFieldValue(merged, ctx.resolvePath);
   if (!resolvedValue) {
@@ -617,9 +609,129 @@ function expandParamArrayIndex(
   for (const [key, value] of Object.entries(result)) {
     if (typeof value === "string" && value.includes(".[]")) {
       result[key] = value.replace(".[]", `.[${index}]`);
+    } else if (isMapReference(value) && value.keyPath.includes(".[]")) {
+      result[key] = {
+        ...value,
+        keyPath: value.keyPath.replace(".[]", `.[${index}]`),
+      };
     }
   }
   return result as DescriptorFieldFormat["params"];
+}
+
+// ---------------------------------------------------------------------------
+// metadata.maps references
+// ---------------------------------------------------------------------------
+
+/** Type guard for a `{ map, keyPath }` map reference param. */
+function isMapReference(value: unknown): value is DescriptorMapReference {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof (value as DescriptorMapReference).map === "string" &&
+    typeof (value as DescriptorMapReference).keyPath === "string"
+  );
+}
+
+/**
+ * Canonical string form of a resolved key path value, used as the
+ * `metadata.maps` lookup key: lowercase hex for addresses and bytes,
+ * decimal for integers.
+ */
+function mapKeyFromResolved(value: ArgumentValue | BytesSliceValue): string {
+  switch (value.type) {
+    case "address":
+    case "bytes":
+    case "bytes-slice":
+      return bytesToHex(value.bytes);
+    case "uint":
+    case "int":
+      return value.value.toString();
+    case "string":
+      return value.value;
+    case "bool":
+      return value.value ? "true" : "false";
+  }
+}
+
+/**
+ * Resolve a `{ map, keyPath }` reference against `metadata.maps`.
+ *
+ * Per ERC-7730 a lookup miss makes the descriptor invalid for this
+ * transaction, so it is reported as INVALID_DESCRIPTOR. A key path that
+ * names a missing container field is reported like any other missing
+ * container path. `where` names the param and field for the messages.
+ */
+function resolveMapReference(
+  ref: DescriptorMapReference,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+  where: string,
+): { value: string | number | boolean } | { warning: Warning } {
+  const resolved = resolvePath(ref.keyPath);
+  if (!resolved) {
+    if (ref.keyPath.startsWith("@.")) {
+      return {
+        warning: warn(
+          "CONTAINER_MISSING_REQUIRED_PATH",
+          `Descriptor requires container field '${ref.keyPath}' for ${where}, but it was not provided in the container`,
+        ),
+      };
+    }
+    return {
+      warning: warn(
+        "INVALID_DESCRIPTOR",
+        `No value found for key path '${ref.keyPath}' of ${where}`,
+      ),
+    };
+  }
+
+  const key = mapKeyFromResolved(resolved);
+  const value = resolveMetadataEntry(metadata, `${ref.map}.values`, key);
+  if (
+    typeof value !== "string" &&
+    typeof value !== "number" &&
+    typeof value !== "boolean"
+  ) {
+    return {
+      warning: warn(
+        "INVALID_DESCRIPTOR",
+        `No entry for key '${key}' in map '${ref.map}' (${where})`,
+      ),
+    };
+  }
+  return { value };
+}
+
+/**
+ * Substitute every map reference in the field's params with its resolved
+ * constant. Values keep their JSON type, so a map can feed a numeric param.
+ */
+function resolveParamMapReferences(
+  field: DescriptorFieldFormat,
+  resolvePath: ResolvePath,
+  metadata: DescriptorMetadata | undefined,
+): { field: DescriptorFieldFormat } | { warning: Warning } {
+  if (!field.params) return { field };
+
+  let substituted: Record<string, unknown> | undefined;
+  for (const [name, value] of Object.entries(field.params)) {
+    if (!isMapReference(value)) continue;
+    const result = resolveMapReference(
+      value,
+      resolvePath,
+      metadata,
+      `param '${name}' of field '${field.label ?? field.path}'`,
+    );
+    if ("warning" in result) return result;
+    substituted ??= { ...field.params };
+    substituted[name] = result.value;
+  }
+
+  if (!substituted) return { field };
+  return {
+    field: { ...field, params: substituted as DescriptorFieldFormatParams },
+  };
 }
 
 /**
